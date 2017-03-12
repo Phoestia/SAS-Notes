@@ -1,0 +1,367 @@
+
+libname sales "SS";
+
+*merge orderline, product, orders, campaign, customer into one table;
+/*data wireless;*/
+/*set Tmp1.wireless ;*/
+/*run;*/
+
+
+proc sort data=sales.orderline out=orderline;
+	by productid;
+run;
+proc sort data=sales.product out=product;
+	by productid;
+run;
+data withgroup;
+	merge orderline product;
+	by productid;
+run;
+
+proc sort data=withgroup;
+	by orderid;
+run;
+proc sort data=sales.orders out=orders;
+	by orderid;
+run;
+
+data orderandline;
+	merge orders withgroup (rename=(totalprice=subtotal));
+	by orderid;
+run;
+
+proc sort data=orderandline;
+	by campaignid;
+run;
+proc sort data=sales.campaign out=campaign;
+	by campaignid;
+run;
+
+data orderandline1;
+	merge orderandline campaign;
+	by campaignid;
+run;
+
+proc sort data=orderandline1;
+	by customerid;
+run;
+proc sort data=sales.customer out=customer;
+	by customerid;
+run;
+
+data full; 
+	merge customer orderandline1;
+	by customerid;
+run;
+
+proc sql;
+select min(orderdate) format=date9., max(orderdate) format=date9.
+from full;
+quit;
+/*04OCT2009  20SEP2016*/
+
+*******full is the entire sales data on orderline level ********;
+
+proc sort data=full out=countoir(keep=householdid subtotal  orderdate paymenttype channel);
+	by householdid;
+	where householdid ne .;
+run;
+
+*calculate the total number of purchases for each household;
+data count (keep=householdid  npurchase);
+	set countoir;
+	by householdid;
+	if first.householdid then Npurchase=0;
+	Npurchase+1;
+	if last.householdid then output;
+run;
+
+
+*calculate the total cost for each household;
+data cost (keep=householdid  cost);
+	set countoir;
+	by householdid ;
+	if first.householdid then cost=0;
+	cost+subtotal;
+	if last.householdid then output;
+run;
+
+
+
+*calculate the purchase time span for each household;
+proc sort data=countoir;
+	by householdid orderdate;
+run;
+data timespan  (keep=householdid  timespan);
+	set countoir;
+	by householdid  orderdate;
+	retain temp;
+	if first.householdid then temp=orderdate;
+	if last.householdid then do;
+		timespan=intck('day', temp, orderdate);
+		output;
+	end;
+	drop temp;
+run;
+
+
+*calculate the mode of paymenttype for each household;
+proc freq data=countoir noprint;
+	table householdid*paymenttype/out=paymentype;
+run;
+proc sort data=paymentype;
+	by householdid  descending count;
+run;
+data paytype;
+	set paymentype;
+	by householdid  descending count;
+	if first.householdid then output;
+	drop count percent;
+run;
+
+
+*calculate the mode of campaign channel for each  household;
+proc freq data=countoir noprint;
+	table householdid*channel/out=channel;
+run;
+proc sort data=channel;
+	by householdid  descending count;
+run;
+
+data channel;
+	set channel;
+	by householdid  descending count;
+	if first.householdid  then output;
+	drop count percent;
+run;
+
+
+*merged is the analysis table which contains total number of purchase, ;
+*total cost, total purchase time span, most frequent paymenttype, most frequent campaign channel ;
+*for each  household;
+data merged;
+	merge count cost timespan paytype channel;
+	by householdid ;
+run;
+
+proc freq data=merged;
+table npurchase  paymenttype channel/missing;
+run;
+
+*Segment the households;
+data merged;
+	set merged;
+	cost1=cost+ranuni(555)/1000000;
+run;
+proc rank data=merged group=5 out=merged (drop=cost1);
+	var cost1 ;
+	ranks cost_g ;
+run;
+
+proc rank data=merged group=2 out=merged;
+	var timespan ;
+	ranks timespan_g ;
+run;
+
+proc rank data=merged group=2 out=merged;
+	var npurchase;
+	ranks npurchase_g;
+run;
+
+proc freq data=merged;
+table cost_g timespan_g npurchase_g ;
+run;
+
+*Produce the correlation matrix for total number of purchase, total cost, total purchase time span ;
+proc corr data=merged outp=pvalue;
+	var npurchase cost timespan;
+run;
+
+data pvalue;
+	set pvalue;
+	where _type_='CORR';
+	drop _type_;
+run;
+
+data pvalue_1;
+	set pvalue (rename=(_name_=Var1 npurchase=corr));
+	Var2='Npurchase';
+	keep  var1 var2 corr;
+run;
+data pvalue_2;
+	set pvalue (rename=(_name_=Var1 cost=corr));
+	Var2='cost';
+	keep  var1 var2 corr;
+run;
+data pvalue_3;
+	set pvalue (rename=(_name_=Var1 timespan=corr));
+	Var2='timespan';
+	keep  var1 var2 corr;
+run;
+data pvalue_r;
+	set pvalue_1 pvalue_2 pvalue_3;
+	if var1<=var2 then delete;
+run;
+
+
+/*	Compute the correlation coefficient between the following pair of variables */
+*a.	Cost_g vs. timespan;
+proc corr data=merged spearman outs=svalue1;
+	var cost_g;
+	with timespan;
+run;
+data svalue1_r;
+	set svalue1 (rename=(cost_g=corr));
+	where _type_='CORR';
+	Var1='cost_g';
+	Var2='timespan';
+	drop _type_ _name_;
+run;
+
+
+*b.	Timespan_g vs. Npurchase;
+proc corr data=merged spearman outs=svalue2;
+	var timespan_g;
+	with npurchase;
+run;
+data svalue2_r;
+	set svalue2 (rename=(timespan_g=corr));
+	where _type_='CORR';
+	Var1='timespan_g';
+	Var2='npurchase';
+	drop _type_ _name_;
+run;
+
+*c.	Channel vs. cost_g;
+proc freq data=merged;
+	table channel*cost_g/chisq;
+	output out=cvalue1 cramv;
+run;
+data cvalue1;
+	set cvalue1(rename=(_cramv_=corr));
+	Var1='channel';
+	Var2='cost_g';
+run;
+
+*d.	Paymenttype vs.cost_g;
+proc freq data=merged;
+	table paymenttype*cost_g/chisq;
+	output out=cvalue2 cramv;
+run;
+data cvalue2;
+	set cvalue2(rename=(_cramv_=corr));
+	Var1='paymenttype';
+	Var2='cost_g';
+run;
+
+
+*e.	Paymenttype vs. timespan_g;
+proc freq data=merged;
+	table paymenttype*timespan_g/chisq;
+	output out=cvalue3 cramv;
+run;
+data cvalue3;
+	set cvalue3(rename=(_cramv_=corr));
+	Var1='paymenttype';
+	Var2='timespan_g';
+run;
+
+
+*f.	Cost vs. Npurchase with the effect of timespan removed;
+proc corr data=merged ;
+	var cost;
+	with Npurchase;
+	partial timespan;
+run;
+
+
+proc corr data=merged;
+	var cost;
+	with Npurchase;
+run;
+
+/*	Output all correlation coefficients calculated in 7 and 8 (except f.), tag them as 'Very strong', 'Strong', 
+'Moderate', 'Week', 'Very week' according to the scales indicated in the lecture notes.*/
+proc format;
+	value degree 0.8-1='Very Strong'
+	             0.6-<0.8='Strong'
+				 0.4-<0.6='Moderate'
+				 0.2-<0.4='Weak'
+				 0-<0.2='Very Week'
+				 .='Missing'
+				 other='Error'
+;
+run;
+data all;
+	set pvalue_r svalue1_r svalue2_r cvalue1 cvalue2 cvalue3;
+	degree=put(corr, degree.);
+run;	
+
+proc freq data=all;
+	table degree;
+run;
+
+
+proc sql;
+	create table order_channel as
+	select o.*, c.channel, year(orderdate) as year
+	from orders o inner join campaign c on o.campaignid=c.campaignid;
+quit;
+
+*	Are the average sale amounts different between states 'New York' and 'New Jersey'?;
+proc sort data=order_channel;
+	by state;
+run;
+proc univariate data=order_channel (where=(state in ('NY' 'NJ'))) normal;
+	var totalprice;
+	by state;
+run;
+
+proc ttest data=order_channel (where=(state in ('NY' 'NJ')));
+	class state;
+	var totalprice;
+run;
+
+*	Are the average sales amounts different among campaign channels 'PARTNER', 'AD' and 'WEB'?;
+proc glm data=order_channel (where=(trim(channel) in ('PARTNER' 'AD'  'WEB')));
+	class channel;
+	model totalprice=channel;
+run;
+quit;
+
+*	Compare average sales amounts among different payment types. If the differences among payment types are significant, find the group differences by performing multiple comparison test;
+proc glm data=order_channel;
+	class paymenttype;
+	model totalprice=paymenttype;
+	means paymenttype/hovtest duncan;
+quit;
+proc npar1way data=order_channel wilcoxon median edf;
+class paymenttype;
+var totalprice;
+run;
+* Compare average sales amounts among years. If the differences among years are significant, find the group differences by performing multiple comparison test;
+proc glm data=order_channel;
+	class year;
+	model totalprice=year;
+	means year/hovtest duncan;
+quit;
+
+*	Use two-way analysis of variance to compare average sales amount among four major states: 'New York', 'New Jersey', 'Florida' and 'California' for campaign channels 'PARTNER', 'AD' and 'WEB'. ;
+/*proc rank data=order_channel out=order_channel;*/
+/*var totalprice;*/
+proc glm data=order_channel (where=(trim(channel) in ('PARTNER' 'AD'  'WEB') and state in ('NY' 'NJ' 'FL' 'CA')));
+	class channel state;
+	model totalprice=channel|state;
+	means channel|state/duncan;
+run;
+quit;
+
+proc means data=order_channel (where=(trim(channel) in ('PARTNER' 'AD'  'WEB') and state in ('NY' 'NJ' 'FL' 'CA'))) nway;
+	class channel state;
+	var totalprice;
+	output out=means mean=;
+run;
+proc plot data=means;
+	plot totalprice*state=channel;
+run;
+quit;
