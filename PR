@@ -1,0 +1,56 @@
+data acqmod.model2;
+	set acqmod.model2;
+	if ranuni(5555)<.5 then splitwgt = smp_wgt;
+							else splitwgt = .;
+	records=1
+/* create a var, records, with the value of 1 for each prospect. This is used in the final vaidation tables*/
+run;
+
+/**creates a model with vars that are significant at the 0.3 or less level**/
+Proc logistic data= acqmod.model2;
+	model active = age_cui age_cos age_sqi age_low inc_sqrt inc_sqri inc_inv
+					inc_low ... .../selection = stepwise sle=.3 sls=.3;
+run;
+
+/** run a backward regression to see if the list of candidate vars not captured in the stepwise selection **/
+proc logistic data=acqmod.model2 descending;
+	weight splitwgt;
+	model active = age_cui age_cos age_sqi age_low inc_sqrt inc_sqri
+		inc_inv inc_low ....../selection = backward sle=.3 sls=.3
+run;
+
+/**take the combination of vars & put them into PROC LOGISTIC with a score selection**/
+proc Logistic data=acqmod.model2;
+	weight splitwgt;
+	model active = HOM_CUI BRT_LOGI AGE_COS AGE_SQI AGE_LOW... ...
+	/selection=score best=2
+run;
+
+proc logistic data=acqmod.model2 descending;
+	weight splitwgt;
+	model active= HOM_CUI AGE_COS AGE_SQI INC_SQRT MORTAL1 MORTAL3
+		HOM_MED TOA_TAN TAN_CU TOB_LOG INQ_SQRT TOP_LOGI TOP_CU TOP_CUI
+		CRL_LOW BRT_LOG BRT_MED POPDNSBC APT_INDD SGLE_IND GENDER_D
+	output out=acqmod.out_act1 pred=pred;
+run;
+
+proc sort data=acqmod.out_act1;
+	by descending pred;
+	run;
+/*Exercise of Power Analysis:*/
+
+proc power;
+twosamplefreq test=pchi
+groupproportions=(.3 .15)
+nullproportiondiff = 0 power =.80
+npergroup=.; run;
+
+proc power; 
+twosamplefreq test=lrchi
+groupproportions = (.3 .15)  /*nullproportiondiff=0*/
+sides =1
+power = .80 npergroup =.; run;
+
+proc power; twosamplefreq test=fisher
+groupproportions = (.3, .15) /*nullproportiondiff=0*/
+power = .80 npergroup=.; run;
