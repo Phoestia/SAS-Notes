@@ -1,0 +1,178 @@
+'''Objective: 
+A wireless company has their customer’s activate and deactivate data for two years. They would like to gain understanding about their customers as well as forecast the number of accounts that might be deactivated for the next six month.
+Data:
+The data is in a SAS dataset:
+acctno –account number, 
+actdt – account active date , 
+deactdt – account deactivate date 
+deactreason – reason for  deactivation
+goodcredit – credit is good or not
+rateplan – rate plan
+dealertype – dealer type
+Analysis:
+1.	Explore the dataset – 
+a.	Is the acctno unique? Give the number of accounts that activated and deactivated.   
+b.	When is earliest and latest active/deactivate date available?
+2.	Calculate tenure in days for each account and give its simple statistics. (active / deactived)
+3.	Calculate the number of accounts which deactivated for each month
+4.	Forecast the number of accounts that will deactivate for the subsequent six months
+5.	Segment the account base, first by account status – ‘deactivated’ and ‘still alive’, then by tenure:  tenures are less than 30 days, between 31 and 60 days, between 61 days and one year, over a year.  Report on the number of accounts and percent of all for each segment.
+6.	Test the general association between the tenure segments and ‘goodcredit’ ‘rateplan’ and ‘dealertype’
+7.	Test the general association between the account status and ‘goodcredit’ ‘rateplan’ and ‘dealertype’
+8.	Is there an association between the account status and tenure segments? Could you come up with a better tenure segmentation strategy that is more associated with the account status?
+'''
+libname tc "SS";
+/*libname tc "I:\CC  class\new courses\DA COOP\telecom";*/
+/*libname tc "Q:\resources\CC  class\DA_three_modules\DA COOP\P3_telecom";*/
+%let obs_date='20JAN2001'd;
+data wireless;
+set Tmp1.wireless ;
+run;
+
+
+/*1. explore the dataset*/
+/*proc sort data=wireless out=wireless nodupkey dupout=dupout;*/
+proc sort data=wireless out=wireless nodupkey;
+by acctno;
+run;
+
+proc tabulate data=wireless missing;
+var actdt deactdt;
+table min*f=date. max*f=date. n*f=comma14. nmiss*f=comma14., actdt deactdt;
+run;
+
+/*2. tenure*/
+data wireless;
+set wireless;
+if deactdt=. then tenure=&obs_date-actdt;
+else tenure=deactdt-actdt;
+churned=(deactdt ne .);
+run;
+
+proc univariate data=wireless plot;
+var tenure;
+run;
+
+/*3 deactivate by month*/
+data wireless;
+set wireless;
+month=month(deactdt);
+year=year(deactdt);
+run;
+proc sql;
+create table month as
+select year, month, 
+		mdy(month, 01, year) as yearmon format=monyy7.,
+       sum(case when deactdt=. then 0 else 1 end) as count
+from wireless
+where year ne .
+group by year, month
+order by 1 , 2;
+quit;
+
+/*4. forecast*/
+proc forecast data=month lead=6 interval = month outfull out=f_out outresid;
+var count;
+id yearmon;
+run;
+
+proc gplot data=month;
+symbol i=spline v=circle h=2;
+plot count * yearmon;
+run;
+
+proc gplot data=f_out (where=( _type_ ne 'RESIDUAL'));
+symbol1 i=none v=star h=2;
+symbol2 i=spline v=circle h=2;
+symbol3 i=spline l=20;
+symbol4 i=spline l=20;
+format yearmon monyy7.;
+plot count * yearmon = _type_ /
+href= "01feb2001"d ;
+/*where _type_ ^= "RESIDUAL";*/
+run;
+quit;
+
+/*5 segment*/
+proc format;
+value segment low-30 =1
+            30<-60 =2
+			60<-365=3
+			365<-high=4
+;
+value segmentdesc 
+			1 ='1 - less than 31 days'
+            2 = '2 - between 31 and 60 days'
+			3='3 - between 61 days and a year'
+			4='4 - greater than a year'
+;
+value churned 
+			1='Deactived'
+            0='Still Alive'
+;
+run;
+
+data wireless;
+set wireless;
+churned=(deactdt ne .);
+segment=input(put(tenure, segment.), 4.0);
+run;
+
+proc tabulate data=wireless missing f=comma14.;
+class churned segment;
+table segment=''  all ='Total', (churned='' all='Total')*(N = '# of Accounts' pctn='Percent %' )  /box='Tenure';
+format segment segmentdesc. churned churned. ;
+run;
+
+/*6,7 general association*/
+proc freq data=wireless;
+table segment*(goodcredit rateplan dealertype)/missing chisq;
+table churned*(goodcredit rateplan dealertype)/missing chisq;
+format segment segmentdesc. churned churned. ;
+run;
+
+/*8. segmentation*/
+proc freq data=wireless;
+table churned*segment/missing chisq;
+format segment segmentdesc. churned churned. ;
+run;
+
+proc rank data=wireless groups=20 out=wireless_g;
+var tenure;
+ranks tenure_g;
+run;
+
+proc freq data=wireless_g;
+table churned * tenure_g/missing chisq;
+run;
+
+proc sql;
+create table wireles_g_1 as
+select tenure_g, min(tenure) as min, max(tenure) as max
+, sum(churned)/count(*) as col_churn format=percent11.2
+from wireless_g
+group by tenure_g;
+quit;
+
+data wireless_g_2;
+set wireless_g;
+if tenure_g=0 then seg='a';
+else if tenure_g in (1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12) then seg='b';
+else if tenure_g in (2, 13, 14, 15, 16, 17, 18) then seg='c';
+else if tenure_g=19 then seg='d';
+else seg='e';
+run;
+proc freq data=wireless_g_2;
+table churned*seg/missing chisq;
+run;
+
+/*regroup for find the monotonicity*/
+proc lifetest data=wireless method=lt notable plots=(h s);
+time tenure*churned(0);
+/*strata goodcredit;*/
+run;
+proc lifetest data=wireless method=lt notable plots=(h s);
+where rateplan^=1;
+time tenure*churned(0);
+strata  rateplan/ group=goodcredit;
+run;
