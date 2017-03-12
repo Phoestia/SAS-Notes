@@ -1,26 +1,4 @@
-'''Objective: 
-A wireless company has their customer’s activate and deactivate data for two years. They would like to gain understanding about their customers as well as forecast the number of accounts that might be deactivated for the next six month.
-Data:
-The data is in a SAS dataset:
-acctno –account number, 
-actdt – account active date , 
-deactdt – account deactivate date 
-deactreason – reason for  deactivation
-goodcredit – credit is good or not
-rateplan – rate plan
-dealertype – dealer type
-Analysis:
-1.	Explore the dataset – 
-a.	Is the acctno unique? Give the number of accounts that activated and deactivated.   
-b.	When is earliest and latest active/deactivate date available?
-2.	Calculate tenure in days for each account and give its simple statistics. (active / deactived)
-3.	Calculate the number of accounts which deactivated for each month
-4.	Forecast the number of accounts that will deactivate for the subsequent six months
-5.	Segment the account base, first by account status – ‘deactivated’ and ‘still alive’, then by tenure:  tenures are less than 30 days, between 31 and 60 days, between 61 days and one year, over a year.  Report on the number of accounts and percent of all for each segment.
-6.	Test the general association between the tenure segments and ‘goodcredit’ ‘rateplan’ and ‘dealertype’
-7.	Test the general association between the account status and ‘goodcredit’ ‘rateplan’ and ‘dealertype’
-8.	Is there an association between the account status and tenure segments? Could you come up with a better tenure segmentation strategy that is more associated with the account status?
-'''
+
 libname tc "SS";
 /*libname tc "I:\CC  class\new courses\DA COOP\telecom";*/
 /*libname tc "Q:\resources\CC  class\DA_three_modules\DA COOP\P3_telecom";*/
