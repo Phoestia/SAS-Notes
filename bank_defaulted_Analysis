@@ -1,0 +1,160 @@
+
+libname h "\\Mac\Home\Desktop\reading\Victoria\DA\Bank";
+
+proc import datafile="\\Mac\Home\Desktop\reading\Victoria\DA\Bank\loan.xlsx"
+			out=h.loan
+			dbms=csv replace;
+run;
+
+/*2. descriptive statistics and plots*/
+proc means data=h.loan n nmiss min max mean median std;
+var _numeric_;
+run;
+proc freq data=h.loan ;
+table defaulted reason job/missing;
+run;
+
+proc sort data=h.loan;
+by defaulted;
+run;
+
+proc univariate data=h.loan plots;
+by defaulted;
+var _numeric_;
+run;
+
+proc chart data=h.loan;
+vbar reason job/group=defaulted;
+run;
+proc chart data=h.loan;
+vbar yoj clno/midpoints=0 to 100 by 10 group=defaulted;
+run;
+
+/*3.*/
+proc format;
+value yesno 1='1-Yes'
+            0='2-No'
+			;
+run;
+/*'for odds ratio'*/
+proc freq data=h.loan order=formatted;
+table defaulted*reason/chisq ;
+format defaulted yesno.;
+run;
+
+/*odds ratio=(745/3183)/(396/1384)=0.818014*/
+
+/*for relative risk*/
+proc freq data=h.loan order=formatted;
+table reason*defaulted/chisq missing relrisk;
+format defaulted yesno.;
+run;
+
+/*rr=(745/3928)/(396/1780)=0.85253*/
+
+/*4.*/
+proc freq data=h.loan ;
+table defaulted*job/chisq missing;
+run;
+
+proc ttest data=h.loan;
+var _numeric_;
+class defaulted;
+run;
+proc npar1way data=h.loan;
+var _numeric_;
+class defaulted;
+run;
+
+/*5*/
+proc logistic data=h.loan descending;/*decending for default, if not is for nondecending*/
+model defaulted=CLAGE CLNO DEBTINC DELINQ DEROG  LOAN MORTDUE NINQ  VALUE YOJ /selection=forward ;
+run;
+
+/*sort*/
+proc logistic data=h.loan descending;
+model defaulted=CLAGE CLNO DEBTINC DELINQ DEROG  LOAN MORTDUE NINQ  VALUE YOJ /stb lackfit;
+run;
+log(odds of defaulting a loan)=-5.2038-0.00545*clage-0.0175*clno+0.1041*debtinc+0.6992*delinq+0.7633*derog-0.00001*loan+0.1191*ninq
+
+x1=-5.2038+2*0.1191=-4.9656 odds=0.006974
+x2=-5.2038+1*0.1191=-5.0847 odds=0.006191
+odds ratio=1.126483
+;
+/*6*/
+proc reg data=h.loan;
+model mortdue=value;
+plot (mortdue p. L95. u95.) *value/overlay;
+plot r.*p.;
+output out=regout r=r cookd=cooksk rstudent=rstud dffits=dfits;
+run;
+
+/*7*/
+data influential ;
+set regout;
+p=2;
+n=5960;
+cutdfits=2*((p/n)**0.5);
+cutcookd=4/n;
+rstud_i=(abs(rstud)>3);
+dfits_i=(abs(dfits)>cutdfits);
+cookd_i=(cooksd>cutcookd);
+sum_i=rstud_i+dfits_i+cookd_i;
+if sum_i>0 ;
+run;
+
+/*8*/
+data loan1;
+set regout;
+p=2;
+n=5960;
+cutdfits=2*((p/n)**0.5);
+cutcookd=4/n;
+rstud_i=(abs(rstud)>3);
+dfits_i=(abs(dfits)>cutdfits);
+cookd_i=(cooksd>cutcookd);
+sum_i=rstud_i+dfits_i+cookd_i;
+if sum_i>0 then delete;
+run;
+
+proc reg data=loan1;
+model mortdue=value;
+plot (mortdue p. L95. u95.) *value/overlay;
+plot r.*p.;
+run;
+quit;
+
+/*===========================================*/
+data test;
+set h.loan;
+CLAGE2=CLAGE*CLAGE; 
+CLNO2=CLNO*CLNO; 
+DEBTINC2=DEBTINC*DEBTINC; 
+DELINQ2=DELINQ*DELINQ;
+DEROG2=DEROG*DEROG;  
+LOAN2=LOAN*LOAN;
+MORTDUE2=MORTDUE*MORTDUE; 
+NINQ2=NINQ*NINQ;  
+VALUE2=VALUE*VALUE; 
+YOJ2=YOJ*YOJ;
+run;
+proc logistic data=test descending;
+model defaulted=CLAGE CLNO DEBTINC DELINQ DEROG  LOAN MORTDUE NINQ  VALUE YOJ 
+CLAGE2 CLNO2 DEBTINC2 DELINQ2 DEROG2  LOAN2 MORTDUE2 NINQ2  VALUE2 YOJ2 /selection=forward ;
+run;
+
+proc logistic data=test (where=(uniform(1234)<0.3)) descending;
+model defaulted=
+CLAGE 
+DEBTINC
+DELINQ
+DEROG
+LOAN
+VALUE
+CLAGE2
+DEBTINC2
+LOAN2 NINQ2 VALUE2/lackfit influence iplots;
+OUTPUT OUT=diagnose P=pred L=L_CI U=H_CI XBETA=lp /*STDBETA=stdb*/ H=leverage RESCHI=Pearson RESDEV=resdev DFBETAS=difbeta C=c_stat CBAR=C_CI DIFCHISQ=diffchisq DIFDEV=diffDev;
+run;
+
+
